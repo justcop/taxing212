@@ -351,137 +351,149 @@ const app = new Vue({
     },
     // Calculation Methods:
     addFile() {
-      var t = this;
-      let data = [];
-      let dataKey = 0;
-      if (localStorage.getItem("rawData") != null) {
-        data = JSON.parse(localStorage.getItem('rawData'));
-        // console.log(`Files exist: ${data[0].name}`);
-        dataKey = data.length - 1;
+    var t = this;
+    let data = [];
+    let dataKey = 0;
+    if (localStorage.getItem("rawData") != null) {
+      data = JSON.parse(localStorage.getItem('rawData'));
+      dataKey = data.length - 1;
+    }
+
+    var localFile = this.$refs.csvFile.files[0];
+
+    let file = {
+      name: "",
+      data: ""
+    };
+
+    file.name = localFile.name;
+
+    let uniqueFile = 1;
+
+    for (let j in data) {
+      if (data[j].name === file.name) {
+        uniqueFile = 0;
+        alert(`${file.name}\n\nWarning: A file with this name is already loaded.\nIt has not been added again.`);
       }
+    }
 
-      var localFile = this.$refs.csvFile.files[0];
+    if (uniqueFile) {
+      t.fileList.push(file.name);
 
-      let file = {
-        name: "",
-        data: ""
-      };
+      Papa.parse(localFile, {
+        complete: function (results) {
+          // Remove titles
+          var headers = results.data.shift();
 
-      file.name = localFile.name;
+          // Remove any empty lines at the end
+          while (
+            results.data.length > 0 &&
+            results.data[results.data.length - 1].every(col => col == "" || col == null)
+          ) {
+            results.data.pop();
+          }
 
-      let uniqueFile = 1;
+          file.data = results.data;
+          data.push(file);
+          localStorage.setItem("rawData", JSON.stringify(data));
+        }
+      });
+    }
+  },
 
-      for (j in data) {
-        if (data[j].name === file.name) {
-          uniqueFile = 0;
-          alert(`${file.name}\n\nWarning: A file with this name is already loaded.\nIt has not been added again.`);
+      calculate() {
+    let t = this;
+    let data = [];
+    if (localStorage.getItem("rawData") != null) {
+      data = JSON.parse(localStorage.getItem('rawData'));
+
+      for (let file in data) {
+        for (let key in data[file].data) {
+          let trade = data[file].data[key];
+
+          // Use new column indices:
+          // 0: Action
+          // 1: Time
+          // 2: ISIN
+          // 3: Ticker
+          // 4: Name
+          // 5: No. of shares
+          // 6: Price / share
+          // 7: Currency (Price / share)
+          // 8: Exchange rate
+          // 9: Result
+          // 10: Total
+          // 11: Currency (Result)
+          // 12: Currency (Total)
+          // 13: Merchant name
+          // 14: Merchant category
+
+          let type = trade[0];
+
+          if (type === "Deposit") {
+            t.newDeposit(trade);
+          } else if (type === "Withdrawal") {
+            t.newWithdrawal(trade);
+          } else if (type.startsWith("Dividend")) {
+            t.newDividend(trade);
+          } else if (
+            type.toLowerCase().includes("buy") ||
+            type.toLowerCase().includes("sell")
+          ) {
+            t.newTrade(trade);
+          }
         }
       }
 
-      // console.log(`File Name: ${file.name}`);
-      if (uniqueFile) {
-        t.fileList.push(file.name);
-        // console.log(file);
-        var trades = Papa.parse(localFile, {
-          complete: function (results) {
-            // Remove titles
-            var headers = results.data.shift();
+      t.sortTrades();
+      t.populateLedger();
+      t.calculateDisposals();
+      t.generateRoundtrips();
 
-            while (results.data[results.data.length - 1][0] == "") { //remove any empty lines from the end of the file
-              results.data.pop();
-            }
-            file.data = results.data;
-            data.push(file);
-            localStorage.setItem("rawData", JSON.stringify(data));
-            // console.log(`File Data: ${JSON.stringify(file.data)}`);
-          }
-        });
-      }
+      t.calculating = 0;
+      t.calculated = 1;
+    } else {
+      alert("No Files loaded - add your data and try again.");
+    }
+  },
 
-    },
-    calculate() {
-      t = this
-
-      let data = [];
-      if (localStorage.getItem("rawData") != null) {
-        data = JSON.parse(localStorage.getItem('rawData'));
-
-        for (file in data) {
-          for (key in data[file].data) {
-            trade = data[file].data[key];
-
-            let type = trade[0];
-
-            let firstword = type.substr(0, type.indexOf(" ")); // reduce to first word only - makes finding different kinds of dividends far easier
-
-            if (type == "Deposit") { //Account Action
-              t.newDeposit(trade);
-            } else if (type == "Withdrawal") { // Accont Action
-              t.newWithdrawal(trade);
-            } else if (firstword == "Dividend") {
-              t.newDividend(trade);
-            } else { // Specific Holding Action
-              t.newTrade(trade);
-            }
-          }
-        }
-
-        t.sortTrades(); // Organises trades by time
-        t.populateLedger();
-        t.calculateDisposals();
-        t.generateRoundtrips()
-
-        t.calculating = 0;
-        t.calculated = 1;
-      } else {
-        alert("No Files loaded - add your data and try again.");
-      }
-    },
     newDeposit(trade) {
-      t = this;
-      // //special case for free shares:
-      // if (trade[17] == "Free Shares Promotion") {
-      //   // t.addFreeShare(trade);
-      //   return;
-      // }
-      let temp = {
-        uid: this.getUID(),
-        timestamp: this.getTimestamp(trade[1]),
-        dateString: trade[1],
-        value: trade[10]
-      };
-      // console.log(JSON.stringify(temp));
-      if (trade[17] == "Free Shares Promotion") {
-        this.freeShares.push(temp);
-      } else {
-        this.deposits.push(temp);
-      }
-    },
+    let temp = {
+      uid: this.getUID(),
+      timestamp: this.getTimestamp(trade[1]),
+      dateString: trade[1],
+      value: this.getNumber(trade[10]) // 'Total'
+    };
+    this.deposits.push(temp);
+  },
+
     newWithdrawal(trade) {
-      let temp = {
-        uid: this.getUID(),
-        timestamp: this.getTimestamp(trade[1]),
-        dateString: trade[1],
-        value: trade[10]
-      };
-      this.withdrawals.push(temp);
-    },
-    newDividend(trade) {
-      let temp = {
-        uid: this.getUID(),
-        ticker: trade[3],
-        name: trade[4],
-        timestamp: this.getTimestamp(trade[1]),
-        dateString: trade[1],
-        value: Number(trade[10]),
-        isUk: trade[7] === "GBX" ? 1 : 0,
-        taxCurrency: trade[7],
-        taxPaid: trade[11],
-        taxPaidGBP: 0,
-        exchangeRate: 0,
-        ukCompany: 1, // As against fund. This has to be manual user input... maybe checkboxes?
-        inTaxYear: this.inTaxYear(this.getTimestamp(trade[1]))
-      };
+    let temp = {
+      uid: this.getUID(),
+      timestamp: this.getTimestamp(trade[1]),
+      dateString: trade[1],
+      value: this.getNumber(trade[10]) // 'Total'
+    };
+    this.withdrawals.push(temp);
+  },
+
+  newDividend(trade) {
+    // Update if you use more columns, but keep indices as above
+    let temp = {
+      uid: this.getUID(),
+      ticker: trade[3],
+      name: trade[4],
+      timestamp: this.getTimestamp(trade[1]),
+      dateString: trade[1],
+      value: Number(trade[10]), // 'Total'
+      isUk: trade[7] === "GBX" ? 1 : 0, // 'Currency (Price / share)'
+      taxCurrency: trade[7],
+      taxPaid: trade[9], // 'Result'
+      taxPaidGBP: 0,
+      exchangeRate: 0,
+      ukCompany: 1,
+      inTaxYear: this.inTaxYear(this.getTimestamp(trade[1]))
+    };
 
       //Get UK Others list from Local Storage if it exists
       if (localStorage.getItem("UKOthers") != null) {
@@ -515,43 +527,41 @@ const app = new Vue({
       this.dividendsTotal += temp.value;
       this.dividends.push(temp);
     },
-    newTrade(trade) {
-      let rawTradeType = "Sell";
-      ticker = trade[3];
-      name = trade[4];
-      isin = trade[2];
+    
+  newTrade(trade) {
+    let rawTradeType = "Sell";
+    let ticker = trade[3];
+    let name = trade[4];
+    let isin = trade[2];
 
-      if (trade[0].toLowerCase().includes("buy")) {
-        // if (trade[0] == "Market buy" || trade[0] == "Limit buy") {
-        rawTradeType = "Buy";
-      }
+    if (trade[0].toLowerCase().includes("buy")) {
+      rawTradeType = "Buy";
+    }
 
-      let temp = {
-        uid: this.getUID(),
-        timestamp: this.getTimestamp(trade[1]),
-        dateString: trade[1],
-        orderType: trade[0],
-        rawType: rawTradeType,
-        value: this.getNumber(trade[10]),
-        // isin: trade[2],
-        number: this.getNumber(trade[5]),
-        price: this.getNumber(trade[6]),
-        priceGBP: this.getNumber(trade[6]) / this.getNumber(trade[8]), // Price / exchange rate
-        exchangeRate: this.getNumber(trade[8]),
-        result: this.getNumber(trade[9]),
-        total: this.getNumber(trade[10]),
-        withholdingTax: this.getNumber(trade[11]),
-        wthTaxCurrency: trade[12],
-        stampDuty: this.getNumber(trade[14]),
-        transactionFee: this.getNumber(trade[15]),
-        finraFee: this.getNumber(trade[16]),
-        notes: trade[17],
-        t212ID: trade[18],
-        frenchTransactionTax: this.getNumber(trade[19]),
-        wasFree: false,
-        inLedger: 0,
-
-      };
+    let temp = {
+      uid: this.getUID(),
+      timestamp: this.getTimestamp(trade[1]),
+      dateString: trade[1],
+      orderType: trade[0],
+      rawType: rawTradeType,
+      value: this.getNumber(trade[10]), // 'Total'
+      number: this.getNumber(trade[5]), // 'No. of shares'
+      price: this.getNumber(trade[6]), // 'Price / share'
+      priceGBP: this.getNumber(trade[6]) / (this.getNumber(trade[8]) || 1), // Price / exchange rate
+      exchangeRate: this.getNumber(trade[8]), // 'Exchange rate'
+      result: this.getNumber(trade[9]), // 'Result'
+      total: this.getNumber(trade[10]), // 'Total'
+      withholdingTax: 0, // No column in new CSV, so set to 0
+      wthTaxCurrency: "", // No column, set empty
+      stampDuty: 0, // No column, set to 0
+      transactionFee: 0, // No column, set to 0
+      finraFee: 0, // No column, set to 0
+      notes: "", // No column, set to empty
+      t212ID: "", // No column, set to empty
+      frenchTransactionTax: 0, // No column, set to 0
+      wasFree: false,
+      inLedger: 0,
+    };
 
       /// HOLDINGS
       if (!(ticker in this.holdings)) {
