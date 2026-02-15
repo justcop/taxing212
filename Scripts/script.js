@@ -54,6 +54,8 @@ const app = new Vue({
       dividends: 0,
       roundTrips: [],
     },
+    allRoundTrips: [],
+    availableTaxYears: [],
 
     calculating: 0,
     calculated: 0,
@@ -76,6 +78,13 @@ const app = new Vue({
     holdings: {},
     rtHolder: ""
   },
+  watch: {
+    'taxYear.target': function () {
+      if (this.calculated) {
+        this.recalculateTaxYearData();
+      }
+    }
+  },
   mounted: function () {
     //Check Local Storage for data:
     this.$nextTick(function () {
@@ -92,27 +101,14 @@ const app = new Vue({
       let a = Number(this.taxYear.target);
       let b = Number(this.taxYear.target) + 1;
 
-      // Also using this function to compute tax year start and end dates:
-      let startDate = new Date();
-      startDate.setTime(0);
-      let endDate = new Date();
-      endDate.setTime(0);
-      startDate.setDate(6);
-      startDate.setMonth(3);
-      startDate.setFullYear(a);
-      endDate.setDate(5);
-      endDate.setMonth(3);
-      endDate.setFullYear(b);
-      endPlusThirty = endDate;
-      endPlusThirty.setMonth(4);
-
-      this.taxYear.start = startDate.getTime();
-      this.taxYear.end = endDate.getTime();
-      this.taxYear.p30 = endPlusThirty.getTime();
-
       a = String(a).slice(-2);
       b = String(b).slice(-2);
       return (`${a}-${b}FY`);
+    },
+    sortedTaxYears: function () {
+      return this.availableTaxYears.slice().sort(function (a, b) {
+        return b - a;
+      });
     },
     divTyUkC: function () { // Sum of uk company dividends in tax year
       let sum = 0;
@@ -217,6 +213,7 @@ const app = new Vue({
       }
     },
     resetCalculations() {
+      this.setTaxYearBounds(this.taxYear.target);
       this.taxYear.p30Seen = 0;
       this.errorList = [];
       this.purchaseValue = 0;
@@ -244,6 +241,153 @@ const app = new Vue({
         dividends: 0,
         roundTrips: []
       };
+      this.allRoundTrips = [];
+      this.availableTaxYears = [];
+    },
+    setTaxYearBounds(targetYear) {
+      let a = Number(targetYear);
+      let b = Number(targetYear) + 1;
+
+      let startDate = new Date();
+      startDate.setTime(0);
+      let endDate = new Date();
+      endDate.setTime(0);
+      startDate.setDate(6);
+      startDate.setMonth(3);
+      startDate.setFullYear(a);
+      endDate.setDate(5);
+      endDate.setMonth(3);
+      endDate.setFullYear(b);
+      let endPlusThirty = new Date(endDate.getTime());
+      endPlusThirty.setDate(endPlusThirty.getDate() + 30);
+
+      this.taxYear.start = startDate.getTime();
+      this.taxYear.end = endDate.getTime();
+      this.taxYear.p30 = endPlusThirty.getTime();
+    },
+    getTaxYearFromTimestamp(timestamp) {
+      let date = new Date(timestamp);
+      let year = date.getUTCFullYear();
+      let month = date.getUTCMonth();
+      let day = date.getUTCDate();
+
+      if (month < 3 || (month === 3 && day < 6)) {
+        return year - 1;
+      }
+      return year;
+    },
+    buildAvailableTaxYears() {
+      let taxYears = {};
+
+      for (let ticker in this.holdings) {
+        let ledger = this.holdings[ticker].ledger;
+        for (let i = 0; i < ledger.length; i++) {
+          if (!isNaN(ledger[i].timestamp)) {
+            taxYears[this.getTaxYearFromTimestamp(ledger[i].timestamp)] = true;
+          }
+        }
+      }
+
+      for (let i = 0; i < this.dividends.length; i++) {
+        if (!isNaN(this.dividends[i].timestamp)) {
+          taxYears[this.getTaxYearFromTimestamp(this.dividends[i].timestamp)] = true;
+        }
+      }
+
+      this.availableTaxYears = Object.keys(taxYears).map(Number).sort(function (a, b) { return a - b; });
+
+      if (this.availableTaxYears.length && this.availableTaxYears.indexOf(this.taxYear.target) < 0) {
+        this.taxYear.target = this.availableTaxYears[this.availableTaxYears.length - 1];
+      }
+    },
+    recalculateTaxYearData() {
+      this.setTaxYearBounds(this.taxYear.target);
+      this.taxYearData = {
+        realisedProfit: 0,
+        realisedLoss: 0,
+        disposals: 0,
+        costs: 0,
+        proceeds: 0,
+        dividends: 0,
+        roundTrips: []
+      };
+
+      for (let key in this.holdings) {
+        let holding = this.holdings[key];
+        holding.tyData = {
+          disposalCount: 0,
+          realisedLoss: 0,
+          realisedProfit: 0
+        };
+
+        for (let i = 0; i < holding.ledger.length; i++) {
+          let entry = holding.ledger[i];
+          entry.inTaxYear = this.inTaxYear(entry.timestamp);
+
+          if (entry.inTaxYear) {
+            holding.tyData.realisedProfit += entry.gain;
+            holding.tyData.realisedLoss += entry.loss;
+            if (entry.change < 0) {
+              holding.tyData.disposalCount++;
+            }
+          }
+        }
+
+        this.taxYearData.realisedProfit += holding.tyData.realisedProfit;
+        this.taxYearData.realisedLoss += holding.tyData.realisedLoss;
+        this.taxYearData.disposals += holding.tyData.disposalCount;
+      }
+
+      for (let i = 0; i < this.dividends.length; i++) {
+        let div = this.dividends[i];
+        div.inTaxYear = this.inTaxYear(div.timestamp);
+        if (div.inTaxYear) {
+          this.taxYearData.dividends += div.value;
+        }
+      }
+
+      for (let i = 0; i < this.allRoundTrips.length; i++) {
+        let trip = this.allRoundTrips[i];
+        if (this.inTaxYear(trip.timestamp)) {
+          this.taxYearData.roundTrips.push(trip);
+          this.taxYearData.proceeds += Number(trip.proceeds);
+          this.taxYearData.costs += Number(trip.cost);
+        }
+      }
+    },
+    calculateUnrealisedGain(holding) {
+      if (!holding || !holding.ledger || !holding.ledger.length || holding.holdings <= 0) {
+        return 0;
+      }
+
+      let latestPrice = 0;
+      let s104Price = 0;
+
+      for (let i = holding.ledger.length - 1; i >= 0; i--) {
+        let entry = holding.ledger[i];
+        if (!latestPrice && !isNaN(entry.price) && entry.price > 0) {
+          latestPrice = Number(entry.price);
+        }
+        if (!s104Price && !isNaN(entry.s104Price) && entry.s104Price > 0) {
+          s104Price = Number(entry.s104Price);
+        }
+        if (latestPrice && s104Price) {
+          break;
+        }
+      }
+
+      if (!latestPrice || !s104Price) {
+        return 0;
+      }
+
+      return (holding.holdings * (latestPrice - s104Price));
+    },
+    totalUnrealisedGain() {
+      let total = 0;
+      for (let key in this.holdings) {
+        total += this.calculateUnrealisedGain(this.holdings[key]);
+      }
+      return total;
     },
     //Housekeeping Methods:
     uiAllHoldings(state) {
@@ -319,6 +463,7 @@ const app = new Vue({
 
     },
     inTaxYear(timestamp) {
+      this.setTaxYearBounds(this.taxYear.target);
       // tax year check
       if (timestamp >= this.taxYear.start && timestamp <= this.taxYear.end) {
         return 1;
@@ -392,7 +537,7 @@ const app = new Vue({
         for (j in holding.ledger) {
           let entry = holding.ledger[j];
           j = Number(j);
-          if (entry.taxable && entry.inTaxYear) {
+          if (entry.taxable) {
             let trip = {};
             //Add to Round Trips
             if (entry.rule === "Section 104") {
@@ -413,28 +558,14 @@ const app = new Vue({
             trip.gainLoss = (entry.gain - entry.loss).toFixed(2);
             trip.note = entry.rule;
 
-            this.taxYearData.roundTrips.push(trip);
+            this.allRoundTrips.push(trip);
           }
         }
       }
       // Now sort trips by date
-      this.taxYearData.roundTrips.sort(function (a, b) {
+      this.allRoundTrips.sort(function (a, b) {
         return a.timestamp - b.timestamp;
       });
-
-      let acquisitionCost = 0;
-      let proceeds = 0;
-      //Calculate tax year total proceeds and aqisition costs
-      for (i in this.taxYearData.roundTrips) {
-        trip = this.taxYearData.roundTrips[i];
-        acquisitionCost += Number(trip.cost);
-        // console.log(`Acquisition Cost: ${acquisitionCost}, ${trip.cost}`);
-        proceeds += Number(trip.proceeds);
-      }
-
-      this.taxYearData.proceeds = proceeds;
-      this.taxYearData.costs = acquisitionCost;
-
     },
     downloadRoundTrips() {
       let csv = "";
@@ -566,7 +697,9 @@ const app = new Vue({
         t.sortTrades(); // Organises trades by time
         t.populateLedger();
         t.calculateDisposals();
-        t.generateRoundtrips()
+        t.generateRoundtrips();
+        t.buildAvailableTaxYears();
+        t.recalculateTaxYearData();
 
         t.calculating = 0;
         t.calculated = 1;

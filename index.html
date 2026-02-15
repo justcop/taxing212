@@ -31,7 +31,6 @@
               calculate Section 104 Holdings prices. If history is spread across multiple files please ensure there are
               no
               overlaps.</p>
-            <p>2025 Update: T212 have changed the columns in the .csv exports and some manual manipulation is needed. Pleas see the comments <a href="https://github.com/GryphonR/taxing212/issues/2#issuecomment-3291926094">here</a></p>
             <div v-if="fileList.length > 0" class="files">
               <strong>Files Loaded:</strong>
               <template v-for="fileName in fileList">
@@ -111,6 +110,12 @@
 
   <div v-if="calculated">
     <h2 class="centre">Calculations for {{fyText}}</h2>
+    <div class="centre" v-if="sortedTaxYears.length">
+      <label for="resultsTaxYearSelect"><strong>Display results for tax year:</strong></label>
+      <select id="resultsTaxYearSelect" class="tax-year-dropdown" v-model.number="taxYear.target">
+        <option v-for="year in sortedTaxYears" :value="year">{{String(year).slice(-2)}}-{{String(year + 1).slice(-2)}}FY</option>
+      </select>
+    </div>
 
     <h4 class="centre">These calculations may be used for tax purposes after they have been checked for accuracy and
       completeness by yourself or your tax advisor.</h4>
@@ -206,6 +211,12 @@
         </div>
         <div class="summary-item c2">
           £{{(realisedProfit - realisedLoss).toFixed(2)}}
+        </div>
+        <div class="summary-item c1">
+          Unrealised Capital Gain (open positions):
+        </div>
+        <div class="summary-item c2">
+          £{{totalUnrealisedGain().toFixed(2)}}
         </div>
         <div class="summary-item c1">
           Dividends Received:
