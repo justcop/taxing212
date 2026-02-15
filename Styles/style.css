@@ -570,3 +570,184 @@ h5{
   color: #8b0000;
   border: 1px solid #e7a2a2;
 }
+
+:root {
+  --slate-100: #f8fafc;
+  --slate-300: #cbd5e1;
+  --slate-700: #334155;
+  --danger: #dc2626;
+  --danger-bg: #fee2e2;
+}
+
+.title-container,
+.round-trip-master-container,
+.holdings-master-container,
+.summary-master-container,
+.error-container,
+.dividends-container,
+.section-title {
+  min-width: 0;
+  width: 95%;
+  max-width: 1200px;
+}
+
+.workflow-shell .instruction,
+.instruction {
+  width: 95%;
+  min-width: 0;
+  max-width: 1200px;
+}
+
+.holding,
+.holding-title {
+  width: 100%;
+  min-width: 0;
+  max-width: 1150px;
+}
+
+.holding,
+.summary-container {
+  border-radius: 12px;
+  border: 1px solid var(--slate-300);
+  box-shadow: 0 10px 25px rgba(15, 23, 42, 0.08);
+}
+
+.summary-container:hover {
+  border-color: var(--shade6);
+}
+
+.error-container {
+  border: 2px solid var(--danger);
+  background-color: var(--danger-bg);
+}
+
+.drop-zone {
+  border: 2px dashed var(--shade5);
+  background: var(--slate-100);
+  border-radius: 10px;
+  padding: 24px 16px;
+  cursor: pointer;
+}
+
+.drop-zone-active {
+  border-color: var(--shade7);
+  background: var(--shade0);
+}
+
+.stepper {
+  width: 95%;
+  max-width: 1200px;
+  margin: 0 auto 20px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+}
+
+.stepper-item {
+  background: var(--slate-100);
+  border: 1px solid var(--slate-300);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-weight: 700;
+  color: var(--slate-700);
+}
+
+.stepper-item.active {
+  background: var(--shade1);
+}
+
+.results-tabs {
+  width: 95%;
+  max-width: 1200px;
+  margin: 20px auto;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tab-button {
+  border: 1px solid var(--slate-300);
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-weight: 700;
+  background: #fff;
+}
+
+.tab-button.active {
+  background: var(--shade2);
+}
+
+.holding-warning {
+  margin-left: 8px;
+}
+
+.currency-negative {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.currency-positive {
+  color: #166534;
+  font-weight: 700;
+}
+
+.trade-container,
+.disposal-container,
+.round-trip-container {
+  min-width: 0;
+  overflow: auto;
+}
+
+.trade-container h5,
+.disposal-container h5,
+.round-trip-container h5 {
+  position: sticky;
+  top: 0;
+  background: #e2e8f0;
+  z-index: 2;
+}
+
+@media (max-width: 768px) {
+  .title-container {
+    min-width: 0;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    position: static;
+    padding: 10px;
+  }
+
+  .title,
+  .subtitle,
+  .back-button {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: center;
+  }
+
+  .g2,
+  .g4,
+  .summary-master-container {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .dividends-container {
+    grid-template-columns: repeat(4, minmax(120px, 1fr));
+    overflow: auto;
+  }
+
+  .section-title {
+    width: 100%;
+    max-height: none;
+  }
+
+  .stepper {
+    flex-direction: column;
+  }
+
+  .stepper-arrow {
+    display: none;
+  }
+}

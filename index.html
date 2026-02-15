@@ -6,6 +6,7 @@
   <title></title>
   <link rel='stylesheet' href='Styles/style.css' />
   <script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <!-- <script src="https://code.jquery.com/jquery-3.2.1.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script> -->
   <script src="Scripts/papaparse.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/luxon@2.0.2/build/global/luxon.min.js"></script>
@@ -22,47 +23,61 @@
 
     <div style="height:100px"></div>
 
-    <div class="g2" v-if="!calculated">
-      <div class="c1">
-        <div style="margin:0 40px">
-          <div class="instruction">
-            <h3 class="summary-box-title">Step 1</h3>
-            <p>Load your T212 trade history CSV files. Full history is required to
-              calculate Section 104 Holdings prices. If history is spread across multiple files please ensure there are
-              no
-              overlaps.</p>
-            <div v-if="fileList.length > 0" class="files">
-              <strong>Files Loaded:</strong>
-              <template v-for="fileName in fileList">
-                <p>{{fileName}}</p>
-              </template>
-            </div>
-            <div class="centre">
-              <input id="fileButton" style="display:none" type="file" ref="csvFile" @change="addFile"></input><br>
-              <div class="button" onclick="document.getElementById('fileButton').click();" />Add CSV File
-            </div>
-            <div v-if="uploadStatus.message" :class="['upload-feedback', uploadStatus.type === 'error' ? 'upload-feedback-error' : 'upload-feedback-success']">
-              {{uploadStatus.message}}
-            </div>
+    <div v-if="!calculated" class="workflow-shell">
+      <div class="stepper">
+        <div class="stepper-item active">1. Upload</div>
+        <div class="stepper-arrow">→</div>
+        <div class="stepper-item">2. Select Year</div>
+        <div class="stepper-arrow">→</div>
+        <div class="stepper-item">3. Calculate</div>
+      </div>
 
-            <div class="button" v-on:click="clearFiles()">Clear Files</div>
+      <div class="g2">
+        <div class="c1">
+          <div style="margin:0 40px">
+            <div class="instruction">
+              <h3 class="summary-box-title">Step 1</h3>
+              <p>Load your T212 trade history CSV files. Full history is required to
+                calculate Section 104 Holdings prices. If history is spread across multiple files please ensure there are
+                no
+                overlaps.</p>
+              <div v-if="fileList.length > 0" class="files">
+                <strong>Files Loaded:</strong>
+                <template v-for="fileName in fileList">
+                  <p>{{fileName}}</p>
+                </template>
+              </div>
+              <div class="centre">
+                <input id="fileButton" style="display:none" type="file" ref="csvFile" @change="addFile"></input><br>
+                <div class="drop-zone" :class="{ 'drop-zone-active': isDraggingFile }" @click="openFilePicker"
+                  @dragover.prevent="onDragOver" @dragleave.prevent="onDragLeave" @drop.prevent="onFileDrop">
+                  <p><strong>Drop CSV files here</strong> or click to browse.</p>
+                  <small>Supports Trading 212 history export format.</small>
+                </div>
+              </div>
+              <div v-if="uploadStatus.message" :class="['upload-feedback', uploadStatus.type === 'error' ? 'upload-feedback-error' : 'upload-feedback-success']">
+                {{uploadStatus.message}}
+              </div>
+
+              <div class="button" v-on:click="clearFiles()">Clear Files</div>
+            </div>
+            <p>Note: If you have made changes to a csv file it must be removed and re-added.</p>
           </div>
-          <p>Note: If you have made changes to a csv file it must be removed and re-added.</p>
-        </div>
-        <div class="instruction">
-          <h3 class="summary-box-title">Step 2</h3>
-          <p>Select Tax Year to report on</p>
-          <div class="centre">
-            <div class="fy-select">{{fyText}}</div>
-            <div class="button" v-on:click="taxYear.target -= 1">-</div>
-            <div class="button" v-on:click="taxYear.target += 1">+</div>
+          <div class="instruction">
+            <h3 class="summary-box-title">Step 2</h3>
+            <p>Select Tax Year to report on</p>
+            <div class="centre">
+              <div class="fy-select">{{fyText}}</div>
+              <div class="button" v-on:click="taxYear.target -= 1">-</div>
+              <div class="button" v-on:click="taxYear.target += 1">+</div>
+            </div>
           </div>
-        </div>
-        <div class="instruction">
-          <h3 class="summary-box-title">Step 3</h3>
-          <div class="centre">
-            <input type="checkbox" name="" id=""> I have read and accept the disclaimer </input>
-            <div class="button" v-on:click="calculate()">Calculate</div>
+          <div class="instruction">
+            <h3 class="summary-box-title">Step 3</h3>
+            <div class="centre">
+              <label><input type="checkbox" v-model="acceptedDisclaimer"> I have read and accept the disclaimer</label>
+              <div class="button" v-on:click="calculate()">Calculate</div>
+            </div>
           </div>
         </div>
       </div>
@@ -105,8 +120,6 @@
           SOFTWARE.</p>
       </div>
     </div>
-  </div>
-
 
   <div v-if="calculated">
     <h2 class="centre">Calculations for {{fyText}}</h2>
@@ -120,7 +133,12 @@
     <h4 class="centre">These calculations may be used for tax purposes after they have been checked for accuracy and
       completeness by yourself or your tax advisor.</h4>
 
-
+    <div class="results-tabs">
+      <button class="tab-button" :class="{active: activeResultsTab === 'dashboard'}" @click="activeResultsTab='dashboard'">Dashboard</button>
+      <button class="tab-button" :class="{active: activeResultsTab === 'holdings'}" @click="activeResultsTab='holdings'">Holdings</button>
+      <button class="tab-button" :class="{active: activeResultsTab === 'dividends'}" @click="activeResultsTab='dividends'">Dividends</button>
+      <button class="tab-button" :class="{active: activeResultsTab === 'roundTrips'}" @click="activeResultsTab='roundTrips'">Round Trips</button>
+    </div>
 
     <div class="error-container" v-if="errorList.length > 0">
       <h2 class="summary-box-title">Errors Detected</h2>
@@ -137,7 +155,7 @@
       </template>
     </div>
 
-    <div class="summary-master-container">
+    <div v-show="activeResultsTab === 'dashboard'" class="summary-master-container">
 
 
       <div class="summary-container g2">
@@ -152,37 +170,37 @@
           Disposal Proceeds:
         </div>
         <div class="summary-item c2">
-          £{{taxYearData.proceeds.toFixed(2)}}
+          {{formatCurrency(taxYearData.proceeds)}}
         </div>
         <div class="summary-item c1">
           Total acquisition costs:
         </div>
         <div class="summary-item c2">
-          £{{taxYearData.costs.toFixed(2)}}
+          {{formatCurrency(taxYearData.costs)}}
         </div>
         <div class="summary-item c1">
           Total Realised Profit:
         </div>
         <div class="summary-item c2">
-          £{{taxYearData.realisedProfit.toFixed(2)}}
+          <span class="currency-positive">{{formatCurrency(taxYearData.realisedProfit)}}</span>
         </div>
         <div class="summary-item c1">
           Total Realised Loss:
         </div>
         <div class="summary-item c2">
-          £{{taxYearData.realisedLoss.toFixed(2)}}
+          <span class="currency-negative">{{formatCurrency(taxYearData.realisedLoss)}}</span>
         </div>
         <div class="summary-item c1">
           Combined P/L:
         </div>
         <div class="summary-item c2">
-          £{{(taxYearData.realisedProfit - taxYearData.realisedLoss).toFixed(2)}}
+          <span :class="currencyClass(taxYearData.realisedProfit - taxYearData.realisedLoss)">{{formatCurrency(taxYearData.realisedProfit - taxYearData.realisedLoss)}}</span>
         </div>
         <div class="summary-item c1">
           Dividends Received:
         </div>
         <div class="summary-item c2">
-          £{{taxYearData.dividends.toFixed(2)}}
+          {{formatCurrency(taxYearData.dividends)}}
         </div>
       </div>
 
@@ -198,31 +216,31 @@
           Total Realised Profit:
         </div>
         <div class="summary-item c2">
-          £{{realisedProfit.toFixed(2)}}
+          <span class="currency-positive">{{formatCurrency(realisedProfit)}}</span>
         </div>
         <div class="summary-item c1">
           Total Realised Loss:
         </div>
         <div class="summary-item c2">
-          £{{realisedLoss.toFixed(2)}}
+          <span class="currency-negative">{{formatCurrency(realisedLoss)}}</span>
         </div>
         <div class="summary-item c1">
           Combined P/L:
         </div>
         <div class="summary-item c2">
-          £{{(realisedProfit - realisedLoss).toFixed(2)}}
+          <span :class="currencyClass(realisedProfit - realisedLoss)">{{formatCurrency(realisedProfit - realisedLoss)}}</span>
         </div>
         <div class="summary-item c1">
           Unrealised Capital Gain (open positions):
         </div>
         <div class="summary-item c2">
-          £{{totalUnrealisedGain().toFixed(2)}}
+          <span :class="currencyClass(totalUnrealisedGain())">{{formatCurrency(totalUnrealisedGain())}}</span>
         </div>
         <div class="summary-item c1">
           Dividends Received:
         </div>
         <div class="summary-item c2">
-          £{{dividendsTotal.toFixed(2)}}
+          {{formatCurrency(dividendsTotal)}}
         </div>
       </div>
 
@@ -233,7 +251,7 @@
             {{getDmyString(dep.timestamp)}}
           </div>
           <div class="summary-item c2">
-            £{{dep.value}}
+            {{formatCurrency(dep.value)}}
           </div>
 
         </template>
@@ -246,13 +264,23 @@
             {{getDmyString(itm.timestamp)}}
           </div>
           <div class="summary-item c2">
-            £{{itm.value}}
+            {{formatCurrency(itm.value)}}
           </div>
         </template>
       </div>
+
+      <div class="summary-container">
+        <h2 class="summary-box-title">Portfolio Allocation</h2>
+        <canvas id="portfolioChart"></canvas>
+      </div>
+
+      <div class="summary-container">
+        <h2 class="summary-box-title">Monthly Dividend Income</h2>
+        <canvas id="dividendChart"></canvas>
+      </div>
     </div>
 
-    <div class="round-trip-master-container">
+    <div v-show="activeResultsTab === 'roundTrips'" class="round-trip-master-container">
       <h2 class="summary-box-title">{{fyText}} Round Trips</h2>
       <h2 class="centre" style="margin:20px auto;" v-if="!taxYearData.roundTrips.length">No Round Trips Found</h2>
       <div v-if="taxYearData.roundTrips.length" class="round-trip-container">
@@ -281,7 +309,7 @@
     </div>
 
     <!-- <div v-if="dividends.length" class="summary-master-container"> -->
-    <div v-if="dividends.length" class="dividends-container">
+    <div v-show="activeResultsTab === 'dividends' && dividends.length" class="dividends-container">
       <h2 class="summary-box-title"> Dividends </h2>
       <h4 class="summary-box-subheading">Tax Year Dividends Summary</h4>
       <h5 class="c2">
@@ -406,14 +434,16 @@
 
     <div style="height: 100px"></div>
 
-    <div class="holdings-master-container">
+    <div v-show="activeResultsTab === 'holdings'" class="holdings-master-container">
 
       <h2 class="section-title">All Holdings</h2>
       <div class="all-holdings-button" v-on:click="uiAllHoldings(1)">Expand All Holdings</div>
       <div class="all-holdings-button" v-on:click="uiAllHoldings(0)">Collapse All Holdings</div>
-      <template v-for="inst in holdings">
+      <div class="all-holdings-button" v-on:click="toggleErrorFilter()">{{showErrorsOnly ? "Show All Holdings" : "Show Errors Only"}}</div>
+      <template v-for="inst in filteredHoldings">
         <div class="holding">
           <div :title="`ISIN: ${inst.isin}`" class="holding-title"><strong>{{inst.name}} ({{inst.ticker}})</strong>
+            <span v-if="holdingHasErrors(inst)" class="holding-warning" title="This holding is linked to warnings">⚠️</span>
           </div>
           <!-- Collapsed Holding Summary -->
           <div v-show="!inst.uiExpand" class="collapsed-holding-summary">
@@ -557,6 +587,7 @@
       LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
       OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
       SOFTWARE.</p>
+  </div>
   </div>
   <script type='text/javascript' src="Scripts/script.js"></script>
 </body>
