@@ -38,6 +38,12 @@ const app = new Vue({
       type: "",
       message: ""
     },
+    acceptedDisclaimer: false,
+    isDraggingFile: false,
+    activeResultsTab: "dashboard",
+    showErrorsOnly: false,
+    portfolioChart: null,
+    dividendChart: null,
     taxYear: {
       target: new Date().getFullYear() - 1,
       start: 0,
@@ -82,6 +88,7 @@ const app = new Vue({
     'taxYear.target': function () {
       if (this.calculated) {
         this.recalculateTaxYearData();
+        this.$nextTick(() => this.renderCharts());
       }
     }
   },
@@ -109,6 +116,13 @@ const app = new Vue({
       return this.availableTaxYears.slice().sort(function (a, b) {
         return b - a;
       });
+    },
+    filteredHoldings: function () {
+      const holdings = Object.values(this.holdings || {});
+      if (!this.showErrorsOnly) {
+        return holdings;
+      }
+      return holdings.filter(h => this.holdingHasErrors(h));
     },
     divTyUkC: function () { // Sum of uk company dividends in tax year
       let sum = 0;
@@ -185,6 +199,160 @@ const app = new Vue({
         type: type,
         message: message
       };
+    },
+    formatCurrency(value) {
+      const num = Number(value || 0);
+      return `£${num.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    },
+    currencyClass(value) {
+      return Number(value || 0) < 0 ? 'currency-negative' : 'currency-positive';
+    },
+    toggleErrorFilter() {
+      this.showErrorsOnly = !this.showErrorsOnly;
+    },
+    holdingHasErrors(inst) {
+      if (!inst || !this.errorList.length) {
+        return false;
+      }
+      const uids = new Set((inst.ledger || []).map(entry => Number(entry.uid)));
+      return this.errorList.some(error => {
+        const linked = Number(error.linkedUid);
+        if (!isNaN(linked) && linked > 0 && uids.has(linked)) {
+          return true;
+        }
+        const msg = String(error.msg || "");
+        return msg.includes(inst.ticker) || msg.includes(inst.name);
+      });
+    },
+    openFilePicker() {
+      this.$refs.csvFile.click();
+    },
+    onDragOver() {
+      this.isDraggingFile = true;
+    },
+    onDragLeave() {
+      this.isDraggingFile = false;
+    },
+    onFileDrop(event) {
+      this.isDraggingFile = false;
+      if (!event.dataTransfer || !event.dataTransfer.files || !event.dataTransfer.files.length) {
+        return;
+      }
+      const droppedFile = event.dataTransfer.files[0];
+      this.addFileFromBlob(droppedFile);
+    },
+    addFileFromBlob(localFile) {
+      var t = this;
+      let data = [];
+      if (localStorage.getItem("rawData") != null) {
+        data = JSON.parse(localStorage.getItem('rawData'));
+      }
+
+      if (!localFile.name.toLowerCase().endsWith(".csv")) {
+        this.setUploadStatus("error", `${localFile.name} is not a CSV file. Please upload a Trading 212 CSV export.`);
+        if (this.$refs.csvFile) this.$refs.csvFile.value = "";
+        return;
+      }
+
+      let file = {
+        name: localFile.name,
+        data: ""
+      };
+
+      for (let j in data) {
+        if (data[j].name === file.name) {
+          this.setUploadStatus("error", `${file.name} is already loaded. Remove it first if you want to upload an updated copy.`);
+          if (this.$refs.csvFile) this.$refs.csvFile.value = "";
+          return;
+        }
+      }
+
+      Papa.parse(localFile, {
+        header: true,
+        skipEmptyLines: true,
+        transformHeader: function (header) {
+          return header == null ? "" : String(header).trim();
+        },
+        complete: function (results) {
+          if (!results.data || !results.data.length) {
+            t.setUploadStatus("error", `${file.name} appears to be empty and was not loaded.`);
+            if (t.$refs.csvFile) t.$refs.csvFile.value = "";
+            return;
+          }
+
+          if (!t.hasRequiredTradeHeaders(results.data)) {
+            t.setUploadStatus("error", `${file.name} does not look like a valid Trading 212 history export (missing Action/Time columns).`);
+            if (t.$refs.csvFile) t.$refs.csvFile.value = "";
+            return;
+          }
+
+          file.data = results.data.map(function (row) {
+            return t.normaliseTradeRow(row);
+          });
+
+          data.push(file);
+          localStorage.setItem("rawData", JSON.stringify(data));
+          t.fileList.push(file.name);
+          t.setUploadStatus("success", `${file.name} uploaded successfully.`);
+          if (t.$refs.csvFile) t.$refs.csvFile.value = "";
+        },
+        error: function () {
+          t.setUploadStatus("error", `${file.name} could not be read. Please re-export the file and try again.`);
+          if (t.$refs.csvFile) t.$refs.csvFile.value = "";
+        }
+      });
+    },
+    renderCharts() {
+      if (typeof Chart === "undefined") {
+        return;
+      }
+
+      const portfolioCanvas = document.getElementById('portfolioChart');
+      const dividendCanvas = document.getElementById('dividendChart');
+      if (!portfolioCanvas || !dividendCanvas) {
+        return;
+      }
+
+      const labels = [];
+      const values = [];
+      for (let key in this.holdings) {
+        const h = this.holdings[key];
+        if (Number(h.holdings) > 0) {
+          const price = (h.ledger || []).length ? Number(h.ledger[h.ledger.length - 1].price || 0) : 0;
+          const value = Number(h.holdings || 0) * price;
+          if (value > 0) {
+            labels.push(h.ticker || h.name);
+            values.push(value);
+          }
+        }
+      }
+
+      const monthly = {};
+      for (let i = 0; i < this.dividends.length; i++) {
+        const d = this.dividends[i];
+        if (!d.inTaxYear) continue;
+        const dt = new Date(d.timestamp);
+        const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
+        monthly[key] = (monthly[key] || 0) + Number(d.value || 0);
+      }
+
+      if (this.portfolioChart) this.portfolioChart.destroy();
+      if (this.dividendChart) this.dividendChart.destroy();
+
+      this.portfolioChart = new Chart(portfolioCanvas, {
+        type: 'pie',
+        data: { labels, datasets: [{ data: values }] },
+        options: { plugins: { legend: { position: 'bottom' } } }
+      });
+
+      this.dividendChart = new Chart(dividendCanvas, {
+        type: 'bar',
+        data: {
+          labels: Object.keys(monthly).sort(),
+          datasets: [{ label: 'Dividends (£)', data: Object.keys(monthly).sort().map(k => monthly[k]), backgroundColor: '#40916C' }]
+        },
+        options: { scales: { y: { beginAtZero: true } } }
+      });
     },
     hasRequiredTradeHeaders(parsedRows) {
       if (!parsedRows || !parsedRows.length) {
@@ -598,75 +766,20 @@ const app = new Vue({
     },
     // Calculation Methods:
     addFile() {
-      var t = this;
-      let data = [];
-      if (localStorage.getItem("rawData") != null) {
-        data = JSON.parse(localStorage.getItem('rawData'));
-      }
-
       var localFile = this.$refs.csvFile.files[0];
       if (!localFile) {
         this.setUploadStatus("error", "No file selected. Please choose a CSV export file.");
         return;
       }
-
-      if (!localFile.name.toLowerCase().endsWith(".csv")) {
-        this.setUploadStatus("error", `${localFile.name} is not a CSV file. Please upload a Trading 212 CSV export.`);
-        this.$refs.csvFile.value = "";
-        return;
-      }
-
-      let file = {
-        name: localFile.name,
-        data: ""
-      };
-
-      for (let j in data) {
-        if (data[j].name === file.name) {
-          this.setUploadStatus("error", `${file.name} is already loaded. Remove it first if you want to upload an updated copy.`);
-          this.$refs.csvFile.value = "";
-          return;
-        }
-      }
-
-      Papa.parse(localFile, {
-        header: true,
-        skipEmptyLines: true,
-        transformHeader: function (header) {
-          return header == null ? "" : String(header).trim();
-        },
-        complete: function (results) {
-          if (!results.data || !results.data.length) {
-            t.setUploadStatus("error", `${file.name} appears to be empty and was not loaded.`);
-            t.$refs.csvFile.value = "";
-            return;
-          }
-
-          if (!t.hasRequiredTradeHeaders(results.data)) {
-            t.setUploadStatus("error", `${file.name} does not look like a valid Trading 212 history export (missing Action/Time columns).`);
-            t.$refs.csvFile.value = "";
-            return;
-          }
-
-          file.data = results.data.map(function (row) {
-            return t.normaliseTradeRow(row);
-          });
-
-          data.push(file);
-          localStorage.setItem("rawData", JSON.stringify(data));
-          t.fileList.push(file.name);
-          t.setUploadStatus("success", `${file.name} uploaded successfully.`);
-          t.$refs.csvFile.value = "";
-        },
-        error: function () {
-          t.setUploadStatus("error", `${file.name} could not be read. Please re-export the file and try again.`);
-          t.$refs.csvFile.value = "";
-        }
-      });
-
+      this.addFileFromBlob(localFile);
     },
     calculate() {
       t = this
+
+      if (!this.acceptedDisclaimer) {
+        alert("Please accept the disclaimer before calculating.");
+        return;
+      }
 
       let data = [];
       if (localStorage.getItem("rawData") != null) {
@@ -700,6 +813,7 @@ const app = new Vue({
         t.generateRoundtrips();
         t.buildAvailableTaxYears();
         t.recalculateTaxYearData();
+        t.$nextTick(() => t.renderCharts());
 
         t.calculating = 0;
         t.calculated = 1;
