@@ -303,9 +303,34 @@ const app = new Vue({
     },
     //Date must be formatted as YYYY-MMM-DD optionally YYY-MM-DDTHH:MM:SS
     getTimestamp(date) { // Takes in a datestring returns UTC Seconds
-      // console.log(date);
-      let timestamp = Date.parse(date);
-      // console.log(timestamp);
+      if (date == null || date === "") {
+        return NaN;
+      }
+
+      // Trading 212 exports can use UK style dates (DD/MM/YYYY HH:mm)
+      // or ISO style timestamps depending on account type / export version.
+      const dateString = String(date).trim();
+      const formats = [
+        "dd/MM/yyyy HH:mm",
+        "dd/MM/yyyy H:mm",
+        "yyyy-MM-dd HH:mm:ss",
+        "yyyy-MM-dd H:mm:ss",
+        "yyyy-MM-dd"
+      ];
+
+      for (let i = 0; i < formats.length; i++) {
+        let parsed = luxon.DateTime.fromFormat(dateString, formats[i], { zone: "utc" });
+        if (parsed.isValid) {
+          return parsed.toMillis();
+        }
+      }
+
+      let isoParsed = luxon.DateTime.fromISO(dateString, { zone: "utc" });
+      if (isoParsed.isValid) {
+        return isoParsed.toMillis();
+      }
+
+      let timestamp = Date.parse(dateString);
       return timestamp;
     },
     getDmyString(timestamp) {
@@ -487,6 +512,8 @@ const app = new Vue({
               t.newWithdrawal(trade);
             } else if (firstword == "Dividend") {
               t.newDividend(trade);
+            } else if (!t.isInstrumentTrade(trade)) {
+              continue;
             } else { // Specific Holding Action
               t.newTrade(trade);
             }
@@ -503,6 +530,21 @@ const app = new Vue({
       } else {
         alert("No Files loaded - add your data and try again.");
       }
+    },
+    isInstrumentTrade(trade) {
+      const action = this.getTradeValue(trade, "action", 0);
+      if (action == null || action === "") {
+        return false;
+      }
+
+      const actionLower = String(action).toLowerCase();
+      if (!actionLower.includes("buy") && !actionLower.includes("sell")) {
+        return false;
+      }
+
+      const ticker = this.getTradeValue(trade, "ticker", 3);
+      const isin = this.getTradeValue(trade, "isin", 2);
+      return ticker !== "" || isin !== "";
     },
     newDeposit(trade) {
       t = this;
