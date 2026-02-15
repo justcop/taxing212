@@ -7,6 +7,28 @@ var assetPrototype = {
 
 }
 
+const REQUIRED_T212_FIELDS = {
+  action: ["Action"],
+  time: ["Time"],
+  isin: ["ISIN"],
+  ticker: ["Ticker"],
+  name: ["Name"],
+  numberOfShares: ["No. of shares"],
+  pricePerShare: ["Price / share"],
+  currencyPricePerShare: ["Currency (Price / share)"],
+  exchangeRate: ["Exchange rate"],
+  resultGbp: ["Result", "Result (GBP)"],
+  totalGbp: ["Total", "Total (GBP)"],
+  withholdingTax: ["Withholding tax"],
+  withholdingTaxCurrency: ["Currency (Withholding tax)", "Currency (Stamp duty reserve tax)"],
+  stampDutyReserveTaxGbp: ["Stamp duty reserve tax", "Stamp duty reserve tax (GBP)"],
+  transactionFeeGbp: ["Transaction fee", "Transaction fee (GBP)"],
+  finraFeeGbp: ["Finra fee", "Finra fee (GBP)"],
+  notes: ["Notes"],
+  id: ["ID"],
+  frenchTransactionTax: ["French transaction tax"]
+};
+
 const app = new Vue({
   el: '#app',
   data: {
@@ -114,6 +136,50 @@ const app = new Vue({
     }
   },
   methods: {
+    normaliseHeaderName(header) {
+      return header == null ? "" : String(header).trim().toLowerCase();
+    },
+    getFieldByHeader(row, headerOptions) {
+      if (row == null) {
+        return "";
+      }
+
+      for (let i = 0; i < headerOptions.length; i++) {
+        let option = headerOptions[i];
+        if (option in row && row[option] != null) {
+          return row[option];
+        }
+      }
+
+      let normalisedOptions = headerOptions.map(option => this.normaliseHeaderName(option));
+      for (let key in row) {
+        if (normalisedOptions.indexOf(this.normaliseHeaderName(key)) >= 0 && row[key] != null) {
+          return row[key];
+        }
+      }
+
+      return "";
+    },
+    normaliseTradeRow(row) {
+      let normalisedTrade = {};
+
+      for (let field in REQUIRED_T212_FIELDS) {
+        normalisedTrade[field] = this.getFieldByHeader(row, REQUIRED_T212_FIELDS[field]);
+      }
+
+      return normalisedTrade;
+    },
+    getTradeValue(trade, field, legacyIndex) {
+      if (trade != null && typeof trade === "object" && !Array.isArray(trade) && field in trade) {
+        return trade[field];
+      }
+
+      if (Array.isArray(trade)) {
+        return trade[legacyIndex];
+      }
+
+      return "";
+    },
     //UI Functions:
     back() {
       this.calculated = 0;
@@ -383,14 +449,15 @@ const app = new Vue({
         t.fileList.push(file.name);
         // console.log(file);
         var trades = Papa.parse(localFile, {
+          header: true,
+          skipEmptyLines: true,
+          transformHeader: function (header) {
+            return header == null ? "" : String(header).trim();
+          },
           complete: function (results) {
-            // Remove titles
-            var headers = results.data.shift();
-
-            while (results.data[results.data.length - 1][0] == "") { //remove any empty lines from the end of the file
-              results.data.pop();
-            }
-            file.data = results.data;
+            file.data = results.data.map(function (row) {
+              return t.normaliseTradeRow(row);
+            });
             data.push(file);
             localStorage.setItem("rawData", JSON.stringify(data));
             // console.log(`File Data: ${JSON.stringify(file.data)}`);
@@ -410,7 +477,7 @@ const app = new Vue({
           for (key in data[file].data) {
             trade = data[file].data[key];
 
-            let type = trade[0];
+            let type = t.getTradeValue(trade, "action", 0);
 
             let firstword = type.substr(0, type.indexOf(" ")); // reduce to first word only - makes finding different kinds of dividends far easier
 
@@ -440,18 +507,18 @@ const app = new Vue({
     newDeposit(trade) {
       t = this;
       // //special case for free shares:
-      // if (trade[17] == "Free Shares Promotion") {
+      // if (this.getTradeValue(trade, "notes", 17) == "Free Shares Promotion") {
       //   // t.addFreeShare(trade);
       //   return;
       // }
       let temp = {
         uid: this.getUID(),
-        timestamp: this.getTimestamp(trade[1]),
-        dateString: trade[1],
-        value: trade[10]
+        timestamp: this.getTimestamp(this.getTradeValue(trade, "time", 1)),
+        dateString: this.getTradeValue(trade, "time", 1),
+        value: this.getTradeValue(trade, "totalGbp", 10)
       };
       // console.log(JSON.stringify(temp));
-      if (trade[17] == "Free Shares Promotion") {
+      if (this.getTradeValue(trade, "notes", 17) == "Free Shares Promotion") {
         this.freeShares.push(temp);
       } else {
         this.deposits.push(temp);
@@ -460,27 +527,27 @@ const app = new Vue({
     newWithdrawal(trade) {
       let temp = {
         uid: this.getUID(),
-        timestamp: this.getTimestamp(trade[1]),
-        dateString: trade[1],
-        value: trade[10]
+        timestamp: this.getTimestamp(this.getTradeValue(trade, "time", 1)),
+        dateString: this.getTradeValue(trade, "time", 1),
+        value: this.getTradeValue(trade, "totalGbp", 10)
       };
       this.withdrawals.push(temp);
     },
     newDividend(trade) {
       let temp = {
         uid: this.getUID(),
-        ticker: trade[3],
-        name: trade[4],
-        timestamp: this.getTimestamp(trade[1]),
-        dateString: trade[1],
-        value: Number(trade[10]),
-        isUk: trade[7] === "GBX" ? 1 : 0,
-        taxCurrency: trade[7],
-        taxPaid: trade[11],
+        ticker: this.getTradeValue(trade, "ticker", 3),
+        name: this.getTradeValue(trade, "name", 4),
+        timestamp: this.getTimestamp(this.getTradeValue(trade, "time", 1)),
+        dateString: this.getTradeValue(trade, "time", 1),
+        value: Number(this.getTradeValue(trade, "totalGbp", 10)),
+        isUk: this.getTradeValue(trade, "currencyPricePerShare", 7) === "GBX" ? 1 : 0,
+        taxCurrency: this.getTradeValue(trade, "currencyPricePerShare", 7),
+        taxPaid: this.getTradeValue(trade, "withholdingTax", 11),
         taxPaidGBP: 0,
         exchangeRate: 0,
         ukCompany: 1, // As against fund. This has to be manual user input... maybe checkboxes?
-        inTaxYear: this.inTaxYear(this.getTimestamp(trade[1]))
+        inTaxYear: this.inTaxYear(this.getTimestamp(this.getTradeValue(trade, "time", 1)))
       };
 
       //Get UK Others list from Local Storage if it exists
@@ -492,12 +559,12 @@ const app = new Vue({
       // exchange rate data, but can be calculated from dividend price per share and GBP paid.
       if (!temp.isUk) {
         if (temp.inTaxYear) this.dividendDetails.nonUk += temp.value;
-        if (this.getNumber(trade[11]) > 0) { // Tax has been paid
+        if (this.getNumber(this.getTradeValue(trade, "withholdingTax", 11)) > 0) { // Tax has been paid
           //Calculate exchange rate: return per share * shares - tax paid / GBP div paid.
-          let exRate = ((this.getNumber(trade[5]) * this.getNumber(trade[6])) - this.getNumber(trade[11])) / this.getNumber(trade[10]);
+          let exRate = ((this.getNumber(this.getTradeValue(trade, "numberOfShares", 5)) * this.getNumber(this.getTradeValue(trade, "pricePerShare", 6))) - this.getNumber(this.getTradeValue(trade, "withholdingTax", 11))) / this.getNumber(this.getTradeValue(trade, "totalGbp", 10));
           console.log(`Exchange Rate: ${exRate} for ${temp.name}`);
-          console.log(`rps: ${trade[5]}, numShare: ${trade[6]}, tax: ${trade[11]}, paid: ${trade[10]}`);
-          temp.taxPaidGBP = this.getNumber(trade[11]) * exRate;
+          console.log(`rps: ${this.getTradeValue(trade, "numberOfShares", 5)}, numShare: ${this.getTradeValue(trade, "pricePerShare", 6)}, tax: ${this.getTradeValue(trade, "withholdingTax", 11)}, paid: ${this.getTradeValue(trade, "totalGbp", 10)}`);
+          temp.taxPaidGBP = this.getNumber(this.getTradeValue(trade, "withholdingTax", 11)) * exRate;
           temp.exchangeRate = exRate;
           if (temp.inTaxYear) this.dividendDetails.taxPaid += temp.taxPaidGBP;
         }
@@ -517,37 +584,37 @@ const app = new Vue({
     },
     newTrade(trade) {
       let rawTradeType = "Sell";
-      ticker = trade[3];
-      name = trade[4];
-      isin = trade[2];
+      ticker = this.getTradeValue(trade, "ticker", 3);
+      name = this.getTradeValue(trade, "name", 4);
+      isin = this.getTradeValue(trade, "isin", 2);
 
-      if (trade[0].toLowerCase().includes("buy")) {
+      if (this.getTradeValue(trade, "action", 0).toLowerCase().includes("buy")) {
         // if (trade[0] == "Market buy" || trade[0] == "Limit buy") {
         rawTradeType = "Buy";
       }
 
       let temp = {
         uid: this.getUID(),
-        timestamp: this.getTimestamp(trade[1]),
-        dateString: trade[1],
-        orderType: trade[0],
+        timestamp: this.getTimestamp(this.getTradeValue(trade, "time", 1)),
+        dateString: this.getTradeValue(trade, "time", 1),
+        orderType: this.getTradeValue(trade, "action", 0),
         rawType: rawTradeType,
-        value: this.getNumber(trade[10]),
+        value: this.getNumber(this.getTradeValue(trade, "totalGbp", 10)),
         // isin: trade[2],
-        number: this.getNumber(trade[5]),
-        price: this.getNumber(trade[6]),
-        priceGBP: this.getNumber(trade[6]) / this.getNumber(trade[8]), // Price / exchange rate
-        exchangeRate: this.getNumber(trade[8]),
-        result: this.getNumber(trade[9]),
-        total: this.getNumber(trade[10]),
-        withholdingTax: this.getNumber(trade[11]),
-        wthTaxCurrency: trade[12],
-        stampDuty: this.getNumber(trade[14]),
-        transactionFee: this.getNumber(trade[15]),
-        finraFee: this.getNumber(trade[16]),
-        notes: trade[17],
-        t212ID: trade[18],
-        frenchTransactionTax: this.getNumber(trade[19]),
+        number: this.getNumber(this.getTradeValue(trade, "numberOfShares", 5)),
+        price: this.getNumber(this.getTradeValue(trade, "pricePerShare", 6)),
+        priceGBP: this.getNumber(this.getTradeValue(trade, "pricePerShare", 6)) / this.getNumber(this.getTradeValue(trade, "exchangeRate", 8)), // Price / exchange rate
+        exchangeRate: this.getNumber(this.getTradeValue(trade, "exchangeRate", 8)),
+        result: this.getNumber(this.getTradeValue(trade, "resultGbp", 9)),
+        total: this.getNumber(this.getTradeValue(trade, "totalGbp", 10)),
+        withholdingTax: this.getNumber(this.getTradeValue(trade, "withholdingTax", 11)),
+        wthTaxCurrency: this.getTradeValue(trade, "withholdingTaxCurrency", 12),
+        stampDuty: this.getNumber(this.getTradeValue(trade, "stampDutyReserveTaxGbp", 14)),
+        transactionFee: this.getNumber(this.getTradeValue(trade, "transactionFeeGbp", 15)),
+        finraFee: this.getNumber(this.getTradeValue(trade, "finraFeeGbp", 16)),
+        notes: this.getTradeValue(trade, "notes", 17),
+        t212ID: this.getTradeValue(trade, "id", 18),
+        frenchTransactionTax: this.getNumber(this.getTradeValue(trade, "frenchTransactionTax", 19)),
         wasFree: false,
         inLedger: 0,
 
@@ -599,7 +666,7 @@ const app = new Vue({
     getNumber(data) {
       console.log(`Incoming data: ${data}`);
       if (data != "" && data != null) {
-        let cleaned = data.replace(/,/g, '');
+        let cleaned = String(data).replace(/,/g, '');
         console.log(`Cleaned Data: ${cleaned}`);
         return (Number(cleaned));
       } else {
