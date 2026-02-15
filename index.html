@@ -34,14 +34,18 @@
             <p>2025 Update: T212 have changed the columns in the .csv exports and some manual manipulation is needed. Pleas see the comments <a href="https://github.com/GryphonR/taxing212/issues/2#issuecomment-3291926094">here</a></p>
             <div v-if="fileList.length > 0" class="files">
               <strong>Files Loaded:</strong>
-              <template v-for="i in fileList">
-                <p>{{fileList[0]}}</p>
+              <template v-for="fileName in fileList">
+                <p>{{fileName}}</p>
               </template>
             </div>
             <div class="centre">
               <input id="fileButton" style="display:none" type="file" ref="csvFile" @change="addFile"></input><br>
               <div class="button" onclick="document.getElementById('fileButton').click();" />Add CSV File
             </div>
+            <div v-if="uploadStatus.message" :class="['upload-feedback', uploadStatus.type === 'error' ? 'upload-feedback-error' : 'upload-feedback-success']">
+              {{uploadStatus.message}}
+            </div>
+
             <div class="button" v-on:click="clearFiles()">Clear Files</div>
           </div>
           <p>Note: If you have made changes to a csv file it must be removed and re-added.</p>
