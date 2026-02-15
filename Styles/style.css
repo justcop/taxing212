@@ -543,3 +543,21 @@ h5{
 .r4{
   grid-row: 4;
 }
+.upload-feedback{
+  margin: 10px auto 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-weight: 600;
+}
+
+.upload-feedback-success{
+  background-color: var(--shade0);
+  color: var(--shade8);
+  border: 1px solid var(--shade4);
+}
+
+.upload-feedback-error{
+  background-color: #fde8e8;
+  color: #8b0000;
+  border: 1px solid #e7a2a2;
+}

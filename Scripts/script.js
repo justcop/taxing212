@@ -34,6 +34,10 @@ const app = new Vue({
   data: {
     fileList: [],
     errorList: [],
+    uploadStatus: {
+      type: "",
+      message: ""
+    },
     taxYear: {
       target: new Date().getFullYear() - 1,
       start: 0,
@@ -180,6 +184,26 @@ const app = new Vue({
 
       return "";
     },
+    setUploadStatus(type, message) {
+      this.uploadStatus = {
+        type: type,
+        message: message
+      };
+    },
+    hasRequiredTradeHeaders(parsedRows) {
+      if (!parsedRows || !parsedRows.length) {
+        return false;
+      }
+
+      for (let i = 0; i < parsedRows.length; i++) {
+        let row = this.normaliseTradeRow(parsedRows[i]);
+        if (row.action !== "" && row.time !== "") {
+          return true;
+        }
+      }
+
+      return false;
+    },
     //UI Functions:
     back() {
       this.calculated = 0;
@@ -187,6 +211,7 @@ const app = new Vue({
     },
     clearFiles() {
       this.fileList = [];
+      this.setUploadStatus("", "");
       if (localStorage.getItem("rawData") != null) {
         localStorage.removeItem("rawData");
       }
@@ -444,51 +469,69 @@ const app = new Vue({
     addFile() {
       var t = this;
       let data = [];
-      let dataKey = 0;
       if (localStorage.getItem("rawData") != null) {
         data = JSON.parse(localStorage.getItem('rawData'));
-        // console.log(`Files exist: ${data[0].name}`);
-        dataKey = data.length - 1;
       }
 
       var localFile = this.$refs.csvFile.files[0];
+      if (!localFile) {
+        this.setUploadStatus("error", "No file selected. Please choose a CSV export file.");
+        return;
+      }
+
+      if (!localFile.name.toLowerCase().endsWith(".csv")) {
+        this.setUploadStatus("error", `${localFile.name} is not a CSV file. Please upload a Trading 212 CSV export.`);
+        this.$refs.csvFile.value = "";
+        return;
+      }
 
       let file = {
-        name: "",
+        name: localFile.name,
         data: ""
       };
 
-      file.name = localFile.name;
-
-      let uniqueFile = 1;
-
-      for (j in data) {
+      for (let j in data) {
         if (data[j].name === file.name) {
-          uniqueFile = 0;
-          alert(`${file.name}\n\nWarning: A file with this name is already loaded.\nIt has not been added again.`);
+          this.setUploadStatus("error", `${file.name} is already loaded. Remove it first if you want to upload an updated copy.`);
+          this.$refs.csvFile.value = "";
+          return;
         }
       }
 
-      // console.log(`File Name: ${file.name}`);
-      if (uniqueFile) {
-        t.fileList.push(file.name);
-        // console.log(file);
-        var trades = Papa.parse(localFile, {
-          header: true,
-          skipEmptyLines: true,
-          transformHeader: function (header) {
-            return header == null ? "" : String(header).trim();
-          },
-          complete: function (results) {
-            file.data = results.data.map(function (row) {
-              return t.normaliseTradeRow(row);
-            });
-            data.push(file);
-            localStorage.setItem("rawData", JSON.stringify(data));
-            // console.log(`File Data: ${JSON.stringify(file.data)}`);
+      Papa.parse(localFile, {
+        header: true,
+        skipEmptyLines: true,
+        transformHeader: function (header) {
+          return header == null ? "" : String(header).trim();
+        },
+        complete: function (results) {
+          if (!results.data || !results.data.length) {
+            t.setUploadStatus("error", `${file.name} appears to be empty and was not loaded.`);
+            t.$refs.csvFile.value = "";
+            return;
           }
-        });
-      }
+
+          if (!t.hasRequiredTradeHeaders(results.data)) {
+            t.setUploadStatus("error", `${file.name} does not look like a valid Trading 212 history export (missing Action/Time columns).`);
+            t.$refs.csvFile.value = "";
+            return;
+          }
+
+          file.data = results.data.map(function (row) {
+            return t.normaliseTradeRow(row);
+          });
+
+          data.push(file);
+          localStorage.setItem("rawData", JSON.stringify(data));
+          t.fileList.push(file.name);
+          t.setUploadStatus("success", `${file.name} uploaded successfully.`);
+          t.$refs.csvFile.value = "";
+        },
+        error: function () {
+          t.setUploadStatus("error", `${file.name} could not be read. Please re-export the file and try again.`);
+          t.$refs.csvFile.value = "";
+        }
+      });
 
     },
     calculate() {
